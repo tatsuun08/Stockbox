@@ -1,6 +1,19 @@
 # Stockbox
 後で読むURLのストックと共有をするシステムです。
 
+## Getting Started
+```bash
+# Gitからクローン
+git clone https://github.com/tatsuun08/Stockbox.git
+cd Stockbox
+
+# 必要なパッケージをインストール
+go mod tidy
+go run main.go
+
+# 別ターミナルで
+curl localhost:1323/test # {"message":"THIS IS TEST!!"}
+```
 ## TODO
 1. 登録・ログイン
 		普通のメールアドレス・パスワード
