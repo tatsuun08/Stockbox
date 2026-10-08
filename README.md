@@ -2,6 +2,10 @@
 後で読むURLのストックと共有をするシステムです。
 
 ## Getting Started
+sqlite3　インストール
+sqlic インストール
+
+
 ```bash
 # Gitからクローン
 git clone https://github.com/tatsuun08/Stockbox.git
