@@ -15,6 +15,11 @@ import (
 	"stockbox/database"
 )
 
+type userRequest struct {
+	Username string `json:username`
+	Passwd string `json:passwd`
+}
+
 type loginRequest struct {
 	Username string `json:"username"`
 	Passwd string `json:"passwd"`
@@ -59,14 +64,6 @@ func run() error {
 	// SQLC用のクエリを投げる構造体
 	queries := database.New(db)
 
-	_, err = queries.CreateUser(ctx, database.CreateUserParams{
-		Username: "Tanaka Taro",
-		Passwd: "1234",
-	})
-	if err != nil {
-		return err
-	}
-
 	e := echo.New()
 
 	e.Use(middleware.RequestLogger())
@@ -81,6 +78,28 @@ func run() error {
 		return c.JSON(http.StatusOK, map[string]string{"message":"THIS IS TEST!!"})
 	})
 
+	e.POST("/create_user", func(c *echo.Context) error {
+		user_request := new(userRequest)		
+
+		if err := c.Bind(user_request); err != nil {
+			return err
+		}
+
+		passwd := user_request.Passwd
+
+		// DBにユーザー情報を保存
+		_, err := queries.CreateUser(ctx, database.CreateUserParams{
+			Username: user_request.Username,
+			Passwd: passwd,
+		})
+
+		if err != nil {
+			return c.JSON(http.StatusInternalServerError, map[string]string{"message":"Username already exists"})
+		}
+
+		return c.JSON(http.StatusOK, map[string]string{"message":"New user created"})
+	})
+
 	e.POST("/login", func(c *echo.Context) error {
 		login_request := new(loginRequest)
 
@@ -92,7 +111,18 @@ func run() error {
 		// 取得したデータを使った処理をここに記述
 		fmt.Println(login_request.Username)
 
-		return c.JSON(http.StatusOK, login_request)
+		passwd := login_request.Passwd
+
+		user_db, err := queries.GetUser(ctx, database.GetUserParams{
+			Username: login_request.Username,
+			Passwd: passwd,	
+		})
+
+		if err != nil {
+			return c.JSON(http.StatusInternalServerError, map[string]string{"message": "Mismatch Username or Password"})
+		}
+
+		return c.JSON(http.StatusOK, fmt.Sprintf("%s login success", user_db.Username))
 	})
 
 	if err := e.Start(fmt.Sprintf(":%d", port)); err != nil {
@@ -106,4 +136,4 @@ func main() {
 	if err := run(); err != nil{
 		log.Fatal(err)
 	}
-}
+} 

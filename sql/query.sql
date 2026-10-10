@@ -6,4 +6,5 @@ LIMIT 1;
 -- name: CreateUser :one
 INSERT INTO users (username, passwd)
 VALUES (?, ?)
-RETURNING id, username, passwd;
+ON CONFLICT(username) DO NOTHING
+RETURNING (SELECT changes() = 0);

@@ -12,7 +12,8 @@ import (
 const createUser = `-- name: CreateUser :one
 INSERT INTO users (username, passwd)
 VALUES (?, ?)
-RETURNING id, username, passwd
+ON CONFLICT(username) DO NOTHING
+RETURNING (SELECT changes() = 0)
 `
 
 type CreateUserParams struct {
@@ -20,11 +21,11 @@ type CreateUserParams struct {
 	Passwd   string
 }
 
-func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, error) {
+func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (bool, error) {
 	row := q.db.QueryRowContext(ctx, createUser, arg.Username, arg.Passwd)
-	var i User
-	err := row.Scan(&i.ID, &i.Username, &i.Passwd)
-	return i, err
+	var column_1 bool
+	err := row.Scan(&column_1)
+	return column_1, err
 }
 
 const getUser = `-- name: GetUser :one
