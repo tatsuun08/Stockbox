@@ -2,10 +2,10 @@
 // versions:
 //   sqlc v1.31.1
 
-package db
+package database
 
 type User struct {
 	ID       int64
-	Name     string
-	Password string
+	Username string
+	Passwd   string
 }

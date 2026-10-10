@@ -12,8 +12,13 @@ import (
 
 	"github.com/labstack/echo/v5"
 	"github.com/labstack/echo/v5/middleware"
-	// "stockbox/db"
+	"stockbox/database"
 )
+
+type loginRequest struct {
+	Username string `json:"username"`
+	Passwd string `json:"passwd"`
+}
 
 //go:embed sql/schema.sql
 var ddl string
@@ -21,7 +26,7 @@ var ddl string
 // DB接続
 func connect_db() (*sql.DB, error) {
 	// データベース接続
-	db, err := sql.Open("sqlite", ":memory:")
+	db, err := sql.Open("sqlite", "appdb.db")
 	if err != nil{
 		return nil, err
 	}
@@ -51,6 +56,17 @@ func run() error {
 		return err
 	}
 
+	// SQLC用のクエリを投げる構造体
+	queries := database.New(db)
+
+	_, err = queries.CreateUser(ctx, database.CreateUserParams{
+		Username: "Tanaka Taro",
+		Passwd: "1234",
+	})
+	if err != nil {
+		return err
+	}
+
 	e := echo.New()
 
 	e.Use(middleware.RequestLogger())
@@ -63,6 +79,20 @@ func run() error {
 
 	e.GET("/test", func(c *echo.Context) error {
 		return c.JSON(http.StatusOK, map[string]string{"message":"THIS IS TEST!!"})
+	})
+
+	e.POST("/login", func(c *echo.Context) error {
+		login_request := new(loginRequest)
+
+		// リクエストのJSONを構造体にバインド
+		if err := c.Bind(login_request); err != nil {
+			return err
+		}
+		
+		// 取得したデータを使った処理をここに記述
+		fmt.Println(login_request.Username)
+
+		return c.JSON(http.StatusOK, login_request)
 	})
 
 	if err := e.Start(fmt.Sprintf(":%d", port)); err != nil {
