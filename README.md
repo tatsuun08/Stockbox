@@ -11,6 +11,9 @@ sqlic インストール
 git clone https://github.com/tatsuun08/Stockbox.git
 cd Stockbox
 
+# sqlc/sqliteのインストールが必要
+sqlc generate
+
 # 必要なパッケージをインストール
 go mod tidy
 go run main.go

@@ -51,6 +51,7 @@ func run() error {
 		return err
 	}
 
+	// ECHO インスタンス作成
 	e := echo.New()
 
 	e.Use(middleware.RequestLogger())
