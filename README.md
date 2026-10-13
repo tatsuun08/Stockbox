@@ -20,7 +20,7 @@ curl localhost:1323/test # {"message":"THIS IS TEST!!"}
 ```
 ## TODO
 1. 登録・ログイン
-		ログイン登録時にパスワードをハッシュ化
+		ハッシュ認証システムをDBに組み込む
 		セッションIDの作成
 		セッションIDをCookieに保存
 2. 自分のボックス画面
