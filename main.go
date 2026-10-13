@@ -2,22 +2,39 @@ package main
 
 import (
 	"context"
+	// "crypto/rand"
+	"crypto/subtle"
 	"database/sql"
 	_ "embed"
+	"encoding/base64"
+
+	// "encoding/base64"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 
 	_ "modernc.org/sqlite"
 
 	"github.com/labstack/echo/v5"
 	"github.com/labstack/echo/v5/middleware"
+	"golang.org/x/crypto/argon2"
+
 	"stockbox/database"
 )
 
+const (
+	memory = 64 * 1024
+	time = 3
+	threads = 4
+	keyLength = 32
+	saltLen = 16
+)
+
 type userRequest struct {
-	Username string `json:username`
-	Passwd string `json:passwd`
+	Username string `json:"username"`
+	Passwd string `json:"passwd"`
 }
 
 type loginRequest struct {
@@ -45,6 +62,58 @@ func create_table(db *sql.DB, ctx context.Context) error {
 	}
 	return nil
 }
+
+
+// Hashing with argon2
+func HashingArgon2(password string, salt []byte, time uint32, memory uint32, threads uint8, keyLen uint32)(string, error){
+	// テキストのBase64エンコーディング
+	encodedPassword := []byte(password)
+
+	hash := argon2.IDKey(encodedPassword, salt, time, memory, threads, keyLen)
+
+	b64Salt := base64.RawStdEncoding.EncodeToString(salt) // (byte -> b64 string)
+	b64Hash := base64.RawStdEncoding.EncodeToString(hash) // (byte -> b64 string)
+
+	return fmt.Sprintf("$argon2id$v=%d$m=%d,t=%d,p=%d$%s$%s", argon2.Version, memory, time , threads, b64Salt, b64Hash), nil
+}
+
+// test argon2
+func VerifyPassword(password string, encodedHash string)(bool, error) {
+	vals := strings.Split(encodedHash, "$")
+	if (len(vals) != 6){
+		return false, errors.New("invalid hash format")
+	}
+
+	// パラメータの取得　メモリ、　時間、並列度
+	var timeCost, memoryCost uint32
+	var threads uint8
+	_, err := fmt.Sscanf(vals[3], "m=%d,t=%d,p=%d", &memoryCost, &timeCost, &threads)
+
+	if err != nil {
+		return false, err
+	}
+
+	salt, err := base64.RawStdEncoding.DecodeString(vals[4])
+	if err != nil {
+		return false, errors.New("failed to decode salt")
+	}
+	// ハッシュ値の取得
+	storedHash, err := base64.RawStdEncoding.DecodeString(vals[5])
+	if err != nil {
+		return false, errors.New("failed to decode hash")
+	}
+	// 検出したソルトでパスワードをハッシュ化（Argon2）
+	keyLen := len(storedHash)
+
+	comparisonHash := argon2.IDKey([]byte(password), salt, timeCost, memoryCost, uint8(threads), uint32(keyLen))
+
+	if subtle.ConstantTimeCompare(comparisonHash, storedHash) == 1 {
+		return true, nil
+	}
+
+	return false, nil
+}
+
 
 func run() error {
 	var port int = 1323
