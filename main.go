@@ -133,6 +133,7 @@ func run() error {
 	// SQLC用のクエリを投げる構造体
 	queries := database.New(db)
 
+	// ECHO インスタンス作成
 	e := echo.New()
 
 	e.Use(middleware.RequestLogger())
