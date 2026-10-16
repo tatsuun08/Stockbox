@@ -1,5 +1,5 @@
-CREATE TABLE users (
+CREATE TABLE IF NOT EXISTS users (
   id INTEGER PRIMARY KEY,
-  name text NOT NULL, 
-  password text NOT NULL
+  username text NOT NULL UNIQUE,
+  passwd text NOT NULL
 )
