@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	// "crypto/rand"
+	"crypto/rand"
 	"crypto/subtle"
 	"database/sql"
 	_ "embed"
@@ -41,7 +42,6 @@ type loginRequest struct {
 	Username string `json:"username"`
 	Passwd string `json:"passwd"`
 }
-
 //go:embed sql/schema.sql
 var ddl string
 
@@ -153,16 +153,23 @@ func run() error {
 		if err := c.Bind(user_request); err != nil {
 			return err
 		}
+		// ソルトの作成
+		salt := make([]byte, saltLen)
+		if _, err := rand.Read(salt); err != nil {
+			return err
+		}
+		// パスワードのハッシュ化
+		passwd, err := HashingArgon2(user_request.Passwd, salt, memory, time, threads, keyLength)
+		if err != nil {
+			return err
+		}
 
-		passwd := user_request.Passwd
 
 		// DBにユーザー情報を保存
-		_, err := queries.CreateUser(ctx, database.CreateUserParams{
+		if _, err := queries.CreateUser(ctx, database.CreateUserParams{
 			Username: user_request.Username,
 			Passwd: passwd,
-		})
-
-		if err != nil {
+		}); err != nil {
 			return c.JSON(http.StatusInternalServerError, map[string]string{"message":"Username already exists"})
 		}
 
@@ -176,22 +183,27 @@ func run() error {
 		if err := c.Bind(login_request); err != nil {
 			return err
 		}
-		
-		// 取得したデータを使った処理をここに記述
-		fmt.Println(login_request.Username)
 
 		passwd := login_request.Passwd
 
-		user_db, err := queries.GetUser(ctx, database.GetUserParams{
-			Username: login_request.Username,
-			Passwd: passwd,	
-		})
+		user_db, err := queries.GetUser(ctx, login_request.Username)
 
 		if err != nil {
 			return c.JSON(http.StatusInternalServerError, map[string]string{"message": "Mismatch Username or Password"})
 		}
 
-		return c.JSON(http.StatusOK, fmt.Sprintf("%s login success", user_db.Username))
+		var isVerified bool
+
+		if isVerified, err = VerifyPassword(passwd, user_db.Passwd); err != nil {
+			return err
+		}
+
+		if isVerified {
+			return c.JSON(http.StatusOK, fmt.Sprintf("%s login success", user_db.Username))
+		}else {
+			return c.JSON(http.StatusInternalServerError, "login failed")
+		}
+
 	})
 
 	if err := e.Start(fmt.Sprintf(":%d", port)); err != nil {

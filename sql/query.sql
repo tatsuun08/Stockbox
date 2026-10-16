@@ -1,6 +1,6 @@
 -- name: GetUser :one
 SELECT * FROM users
-WHERE users.username = :username AND users.passwd = :passwd 
+WHERE users.username = :username
 LIMIT 1;
 
 -- name: CreateUser :one

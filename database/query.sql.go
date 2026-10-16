@@ -30,17 +30,12 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (bool, e
 
 const getUser = `-- name: GetUser :one
 SELECT id, username, passwd FROM users
-WHERE users.username = ?1 AND users.passwd = ?2 
+WHERE users.username = ?1
 LIMIT 1
 `
 
-type GetUserParams struct {
-	Username string
-	Passwd   string
-}
-
-func (q *Queries) GetUser(ctx context.Context, arg GetUserParams) (User, error) {
-	row := q.db.QueryRowContext(ctx, getUser, arg.Username, arg.Passwd)
+func (q *Queries) GetUser(ctx context.Context, username string) (User, error) {
+	row := q.db.QueryRowContext(ctx, getUser, username)
 	var i User
 	err := row.Scan(&i.ID, &i.Username, &i.Passwd)
 	return i, err
