@@ -9,6 +9,25 @@ import (
 	"context"
 )
 
+const createSession = `-- name: CreateSession :one
+INSERT INTO login_sessions (session_id, user_id)
+VALUES(?, ?)
+
+RETURNING id
+`
+
+type CreateSessionParams struct {
+	SessionID string
+	UserID    int64
+}
+
+func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, createSession, arg.SessionID, arg.UserID)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
 const createUser = `-- name: CreateUser :one
 INSERT INTO users (username, passwd)
 VALUES (?, ?)

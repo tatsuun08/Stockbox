@@ -10,6 +10,7 @@ import (
 	"encoding/base64"
 
 	// "encoding/base64"
+	"time"
 	"errors"
 	"fmt"
 	"log"
@@ -26,11 +27,11 @@ import (
 )
 
 const (
-	memory = 64 * 1024
-	time = 3
-	threads = 4
-	keyLength = 32
-	saltLen = 16
+	MEMORY = 64 * 1024
+	TIME = 3
+	THREADS = 4
+	KEYLENGTH = 32
+	SALTLEN = 16
 )
 
 type userRequest struct {
@@ -114,6 +115,40 @@ func VerifyPassword(password string, encodedHash string)(bool, error) {
 	return false, nil
 }
 
+// セッションIDの作成
+func generateSessionID() (string, error) {
+	// 32バイト（256ビット）の十分なエントロピーを確保
+	b := make([]byte, 32)
+	_, err := rand.Read(b)
+	if err != nil {
+		return "", err
+	}
+
+	// CookieやURLに入れても安全なBase64文字列（RawURLEncoding: パディングなし）に変換
+	return base64.RawURLEncoding.EncodeToString(b), nil
+}
+
+// セッションIDをCookieに書き込み
+func writeCookieSessionId(c *echo.Context, sessionId string) error {
+	cookie := new(http.Cookie)
+	cookie.Name = "sessionId"
+	cookie.Value = sessionId
+	cookie.Expires = time.Now().Add(24 * time.Hour)
+	cookie.Path = "/"
+	c.SetCookie(cookie)
+	return c.String(http.StatusOK, "write a session id in cookie")
+}
+
+// セッションIDをCookieから探す
+func readCookieSessionId(c *echo.Context) (string, error) {
+	cookie, err := c.Cookie("sessionId")
+	if err != nil {
+		return "", err
+	}
+
+	return cookie.Value, nil
+}
+
 
 func run() error {
 	var port int = 1323
@@ -155,12 +190,12 @@ func run() error {
 			return err
 		}
 		// ソルトの作成
-		salt := make([]byte, saltLen)
+		salt := make([]byte, SALTLEN)
 		if _, err := rand.Read(salt); err != nil {
 			return err
 		}
 		// パスワードのハッシュ化
-		passwd, err := HashingArgon2(user_request.Passwd, salt, memory, time, threads, keyLength)
+		passwd, err := HashingArgon2(user_request.Passwd, salt, MEMORY, TIME, THREADS, KEYLENGTH)
 		if err != nil {
 			return err
 		}
@@ -200,9 +235,35 @@ func run() error {
 		}
 
 		if isVerified {
+			// セッションを検索
+			_, err := readCookieSessionId(c)
+			if err != nil {
+				// セッションの追加
+				sessionId, err := generateSessionID()
+				if err != nil {
+					return err
+				}
+				// クッキーへの書き込み
+				err = writeCookieSessionId(c, sessionId)
+				if err != nil {
+					return err
+				}
+
+				// DBへの保存
+				_, err = queries.CreateSession(
+					ctx,
+					database.CreateSessionParams{
+						SessionID: sessionId,
+						UserID: user_db.ID,
+					},
+				)
+				if err != nil {
+					return err
+				}
+			}
 			return c.JSON(http.StatusOK, fmt.Sprintf("%s login success", user_db.Username))
 		}else {
-			return c.JSON(http.StatusInternalServerError, "login failed")
+			return c.JSON(http.StatusInternalServerError, map[string]string{"message": "Mismatch Username or Password"})
 		}
 
 	})

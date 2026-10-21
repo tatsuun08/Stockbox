@@ -4,6 +4,18 @@
 
 package database
 
+import (
+	"database/sql"
+)
+
+type LoginSession struct {
+	ID        int64
+	SessionID string
+	UserID    int64
+	ExpiresAt sql.NullString
+	CreatedAt sql.NullString
+}
+
 type User struct {
 	ID       int64
 	Username string
