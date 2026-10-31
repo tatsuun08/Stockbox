@@ -72,10 +72,7 @@ func TestVerifySessionId(t *testing.T) {
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
 
-	err := writeCookieSessionId(c, sessionId)
-	if err != nil {
-		t.Fatalf("クッキーの作成に失敗: %v", err)
-	}
+	writeCookieSessionId(c, sessionId)
 
 	// 2. レスポンスレコーダーから発行されたCookieを拾い上げる
 	res := rec.Result()

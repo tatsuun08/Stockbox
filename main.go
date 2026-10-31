@@ -129,14 +129,13 @@ func generateSessionID() (string, error) {
 }
 
 // セッションIDをCookieに書き込み
-func writeCookieSessionId(c *echo.Context, sessionId string) error {
+func writeCookieSessionId(c *echo.Context, sessionId string) {
 	cookie := new(http.Cookie)
 	cookie.Name = "sessionId"
 	cookie.Value = sessionId
 	cookie.Expires = time.Now().Add(24 * time.Hour)
 	cookie.Path = "/"
 	c.SetCookie(cookie)
-	return c.String(http.StatusOK, "write a session id in cookie")
 }
 
 // セッションIDをCookieから探す
@@ -147,6 +146,50 @@ func readCookieSessionId(c *echo.Context) (string, error) {
 	}
 
 	return cookie.Value, nil
+}
+
+// セッション確認用のミドルウェア
+func SessionMiddleware(queries *database.Queries) echo.MiddlewareFunc {
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c *echo.Context) error {
+			ctx := c.Request().Context()
+			
+			// クッキーを読み込む
+			sessionId, err := readCookieSessionId(c)
+			if err != nil {
+				return c.JSON(http.StatusUnauthorized, map[string]string{"message":"クッキーが見つかりません"})
+			}
+			
+			// DBで探す
+			loginSession, err := queries.GetLoginSession(ctx, sessionId)
+			if err != nil {
+				return c.JSON(http.StatusUnauthorized, map[string]string{"message":"ログインセッションが見つかりません"})
+			}
+
+			// 期限切れチェック
+			if !loginSession.ExpiresAt.Valid {
+				return c.JSON(http.StatusUnauthorized, map[string]string{"message":"期限情報なし"})
+			}
+
+			expiresAt, err := time.Parse("2006-01-02 15:04:05", loginSession.ExpiresAt.String)
+			if err != nil {
+				return c.JSON(http.StatusInternalServerError, map[string]string{"message":"internal server error"})
+			}
+
+			t := time.Now()
+			
+			// 切れていたら
+			if t.After(expiresAt) {
+				// セッションの削除
+				_ = queries.DeleteLoginSession(ctx, sessionId)
+				return c.JSON(http.StatusUnauthorized, map[string]string{"message":"セッション期限切れです"})
+			}
+			// OKなら
+			c.Set("user_id", loginSession.UserID)
+			c.Set("session_id", sessionId)
+			return next(c)
+		}
+	}
 }
 
 
@@ -244,10 +287,7 @@ func run() error {
 					return err
 				}
 				// クッキーへの書き込み
-				err = writeCookieSessionId(c, sessionId)
-				if err != nil {
-					return err
-				}
+				writeCookieSessionId(c, sessionId)
 
 				// DBへの保存
 				_, err = queries.CreateSession(

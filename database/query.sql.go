@@ -12,7 +12,6 @@ import (
 const createSession = `-- name: CreateSession :one
 INSERT INTO login_sessions (session_id, user_id)
 VALUES(?, ?)
-
 RETURNING id
 `
 
@@ -45,6 +44,36 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (bool, e
 	var column_1 bool
 	err := row.Scan(&column_1)
 	return column_1, err
+}
+
+const deleteLoginSession = `-- name: DeleteLoginSession :exec
+DELETE FROM login_sessions
+WHERE session_id = ?1
+LIMIT 1
+`
+
+func (q *Queries) DeleteLoginSession(ctx context.Context, sessionID string) error {
+	_, err := q.db.ExecContext(ctx, deleteLoginSession, sessionID)
+	return err
+}
+
+const getLoginSession = `-- name: GetLoginSession :one
+SELECT id, session_id, user_id, expires_at, created_at FROM login_sessions
+WHERE session_id = ?1
+LIMIT 1
+`
+
+func (q *Queries) GetLoginSession(ctx context.Context, sessionID string) (LoginSession, error) {
+	row := q.db.QueryRowContext(ctx, getLoginSession, sessionID)
+	var i LoginSession
+	err := row.Scan(
+		&i.ID,
+		&i.SessionID,
+		&i.UserID,
+		&i.ExpiresAt,
+		&i.CreatedAt,
+	)
+	return i, err
 }
 
 const getUser = `-- name: GetUser :one
