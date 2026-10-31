@@ -308,6 +308,12 @@ func run() error {
 
 	})
 
+	// ミドルウェアによる検問
+	auth := e.Group("")
+	auth.Use(SessionMiddleware(queries))
+
+	// auth.GET ..
+
 	if err := e.Start(fmt.Sprintf(":%d", port)); err != nil {
 		return err
 	}
