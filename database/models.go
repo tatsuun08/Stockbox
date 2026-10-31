@@ -16,6 +16,22 @@ type LoginSession struct {
 	CreatedAt sql.NullString
 }
 
+type ReadLater struct {
+	ID       int64
+	BoxID    int64
+	AuthorID int64
+	Title    string
+	Urlstr   sql.NullString
+	Content  sql.NullString
+	Isshared bool
+}
+
+type Stockbox struct {
+	ID      int64
+	BoxName string
+	HostID  int64
+}
+
 type User struct {
 	ID       int64
 	Username string

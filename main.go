@@ -312,7 +312,22 @@ func run() error {
 	auth := e.Group("")
 	auth.Use(SessionMiddleware(queries))
 
-	// auth.GET ..
+	// read box 自身のストックボックス一覧 (50)
+	e.POST("/my-box", func(c *echo.Context) error {
+
+
+		return nil
+	})
+
+	// create box
+
+	// delete box
+
+	// create read_later
+	
+	// delete read_later
+
+	// edit read_later 
 
 	if err := e.Start(fmt.Sprintf(":%d", port)); err != nil {
 		return err

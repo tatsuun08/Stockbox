@@ -7,7 +7,55 @@ package database
 
 import (
 	"context"
+	"database/sql"
 )
+
+const createBox = `-- name: CreateBox :one
+INSERT INTO stockbox (box_name, host_id)
+VALUES (?, ?)
+RETURNING id
+`
+
+type CreateBoxParams struct {
+	BoxName string
+	HostID  int64
+}
+
+func (q *Queries) CreateBox(ctx context.Context, arg CreateBoxParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, createBox, arg.BoxName, arg.HostID)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
+const createReadLater = `-- name: CreateReadLater :one
+INSERT INTO read_later (box_id, author_id, title, urlstr, content, isShared)
+VALUES (?, ?, ?, ?, ?, ?)
+RETURNING id
+`
+
+type CreateReadLaterParams struct {
+	BoxID    int64
+	AuthorID int64
+	Title    string
+	Urlstr   sql.NullString
+	Content  sql.NullString
+	Isshared bool
+}
+
+func (q *Queries) CreateReadLater(ctx context.Context, arg CreateReadLaterParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, createReadLater,
+		arg.BoxID,
+		arg.AuthorID,
+		arg.Title,
+		arg.Urlstr,
+		arg.Content,
+		arg.Isshared,
+	)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
 
 const createSession = `-- name: CreateSession :one
 INSERT INTO login_sessions (session_id, user_id)
@@ -46,6 +94,16 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (bool, e
 	return column_1, err
 }
 
+const deleteBox = `-- name: DeleteBox :exec
+DELETE FROM stockbox 
+WHERE id = ?1
+`
+
+func (q *Queries) DeleteBox(ctx context.Context, boxID int64) error {
+	_, err := q.db.ExecContext(ctx, deleteBox, boxID)
+	return err
+}
+
 const deleteLoginSession = `-- name: DeleteLoginSession :exec
 DELETE FROM login_sessions
 WHERE session_id = ?1
@@ -54,6 +112,16 @@ LIMIT 1
 
 func (q *Queries) DeleteLoginSession(ctx context.Context, sessionID string) error {
 	_, err := q.db.ExecContext(ctx, deleteLoginSession, sessionID)
+	return err
+}
+
+const deleteReadLater = `-- name: DeleteReadLater :exec
+DELETE FROM read_later
+WHERE id = ?1
+`
+
+func (q *Queries) DeleteReadLater(ctx context.Context, id int64) error {
+	_, err := q.db.ExecContext(ctx, deleteReadLater, id)
 	return err
 }
 
@@ -76,6 +144,40 @@ func (q *Queries) GetLoginSession(ctx context.Context, sessionID string) (LoginS
 	return i, err
 }
 
+const getMe = `-- name: GetMe :one
+SELECT users.id, username, passwd, ls.id, session_id, user_id, expires_at, created_at FROM users
+JOIN login_sessions AS ls ON users.id = ls.user_id
+WHERE ls.session_id = ?1
+LIMIT 1
+`
+
+type GetMeRow struct {
+	ID        int64
+	Username  string
+	Passwd    string
+	ID_2      int64
+	SessionID string
+	UserID    int64
+	ExpiresAt sql.NullString
+	CreatedAt sql.NullString
+}
+
+func (q *Queries) GetMe(ctx context.Context, sessionID string) (GetMeRow, error) {
+	row := q.db.QueryRowContext(ctx, getMe, sessionID)
+	var i GetMeRow
+	err := row.Scan(
+		&i.ID,
+		&i.Username,
+		&i.Passwd,
+		&i.ID_2,
+		&i.SessionID,
+		&i.UserID,
+		&i.ExpiresAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const getUser = `-- name: GetUser :one
 SELECT id, username, passwd FROM users
 WHERE users.username = ?1
@@ -87,4 +189,42 @@ func (q *Queries) GetUser(ctx context.Context, username string) (User, error) {
 	var i User
 	err := row.Scan(&i.ID, &i.Username, &i.Passwd)
 	return i, err
+}
+
+const updateReadLater = `-- name: UpdateReadLater :one
+UPDATE read_later
+SET 
+  box_id = ?1, 
+  author_id = ?2, 
+  title = ?3, 
+  urlstr = ?4, 
+  content = ?5, 
+  isshared = ?6
+WHERE id = ?7
+RETURNING id
+`
+
+type UpdateReadLaterParams struct {
+	BoxID    int64
+	AuthorID int64
+	Title    string
+	Urlstr   sql.NullString
+	Content  sql.NullString
+	Isshared bool
+	ID       int64
+}
+
+func (q *Queries) UpdateReadLater(ctx context.Context, arg UpdateReadLaterParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, updateReadLater,
+		arg.BoxID,
+		arg.AuthorID,
+		arg.Title,
+		arg.Urlstr,
+		arg.Content,
+		arg.Isshared,
+		arg.ID,
+	)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
 }
