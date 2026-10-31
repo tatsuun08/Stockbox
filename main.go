@@ -10,6 +10,7 @@ import (
 	"encoding/base64"
 
 	// "encoding/base64"
+	"time"
 	"errors"
 	"fmt"
 	"log"
@@ -26,11 +27,11 @@ import (
 )
 
 const (
-	memory = 64 * 1024
-	time = 3
-	threads = 4
-	keyLength = 32
-	saltLen = 16
+	MEMORY = 64 * 1024
+	TIME = 3
+	THREADS = 4
+	KEYLENGTH = 32
+	SALTLEN = 16
 )
 
 type userRequest struct {
@@ -114,6 +115,83 @@ func VerifyPassword(password string, encodedHash string)(bool, error) {
 	return false, nil
 }
 
+// セッションIDの作成
+func generateSessionID() (string, error) {
+	// 32バイト（256ビット）の十分なエントロピーを確保
+	b := make([]byte, 32)
+	_, err := rand.Read(b)
+	if err != nil {
+		return "", err
+	}
+
+	// CookieやURLに入れても安全なBase64文字列（RawURLEncoding: パディングなし）に変換
+	return base64.RawURLEncoding.EncodeToString(b), nil
+}
+
+// セッションIDをCookieに書き込み
+func writeCookieSessionId(c *echo.Context, sessionId string) {
+	cookie := new(http.Cookie)
+	cookie.Name = "sessionId"
+	cookie.Value = sessionId
+	cookie.Expires = time.Now().Add(24 * time.Hour)
+	cookie.Path = "/"
+	c.SetCookie(cookie)
+}
+
+// セッションIDをCookieから探す
+func readCookieSessionId(c *echo.Context) (string, error) {
+	cookie, err := c.Cookie("sessionId")
+	if err != nil {
+		return "", err
+	}
+
+	return cookie.Value, nil
+}
+
+// セッション確認用のミドルウェア
+func SessionMiddleware(queries *database.Queries) echo.MiddlewareFunc {
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c *echo.Context) error {
+			ctx := c.Request().Context()
+			
+			// クッキーを読み込む
+			sessionId, err := readCookieSessionId(c)
+			if err != nil {
+				return c.JSON(http.StatusUnauthorized, map[string]string{"message":"クッキーが見つかりません"})
+			}
+			
+			// DBで探す
+			loginSession, err := queries.GetLoginSession(ctx, sessionId)
+			if err != nil {
+				return c.JSON(http.StatusUnauthorized, map[string]string{"message":"ログインセッションが見つかりません"})
+			}
+
+			// 期限切れチェック
+			if !loginSession.ExpiresAt.Valid {
+				return c.JSON(http.StatusUnauthorized, map[string]string{"message":"期限情報なし"})
+			}
+
+			expiresAt, err := time.Parse("2006-01-02 15:04:05", loginSession.ExpiresAt.String)
+			if err != nil {
+				return c.JSON(http.StatusInternalServerError, map[string]string{"message":"internal server error"})
+			}
+
+			t := time.Now()
+			
+			// 切れていたら
+			if t.After(expiresAt) {
+				// セッションの削除
+				_ = queries.DeleteLoginSession(ctx, sessionId)
+				return c.JSON(http.StatusUnauthorized, map[string]string{"message":"セッション期限切れです"})
+			}
+			// OKなら
+			c.Set("user_id", loginSession.UserID)
+			c.Set("session_id", sessionId)
+			return next(c)
+		}
+	}
+}
+
 
 func run() error {
 	var port int = 1323
@@ -155,12 +233,12 @@ func run() error {
 			return err
 		}
 		// ソルトの作成
-		salt := make([]byte, saltLen)
+		salt := make([]byte, SALTLEN)
 		if _, err := rand.Read(salt); err != nil {
 			return err
 		}
 		// パスワードのハッシュ化
-		passwd, err := HashingArgon2(user_request.Passwd, salt, memory, time, threads, keyLength)
+		passwd, err := HashingArgon2(user_request.Passwd, salt, MEMORY, TIME, THREADS, KEYLENGTH)
 		if err != nil {
 			return err
 		}
@@ -200,12 +278,41 @@ func run() error {
 		}
 
 		if isVerified {
+			// セッションを検索
+			_, err := readCookieSessionId(c)
+			if err != nil {
+				// セッションの追加
+				sessionId, err := generateSessionID()
+				if err != nil {
+					return err
+				}
+				// クッキーへの書き込み
+				writeCookieSessionId(c, sessionId)
+
+				// DBへの保存
+				_, err = queries.CreateSession(
+					ctx,
+					database.CreateSessionParams{
+						SessionID: sessionId,
+						UserID: user_db.ID,
+					},
+				)
+				if err != nil {
+					return err
+				}
+			}
 			return c.JSON(http.StatusOK, fmt.Sprintf("%s login success", user_db.Username))
 		}else {
-			return c.JSON(http.StatusInternalServerError, "login failed")
+			return c.JSON(http.StatusInternalServerError, map[string]string{"message": "Mismatch Username or Password"})
 		}
 
 	})
+
+	// ミドルウェアによる検問
+	auth := e.Group("")
+	auth.Use(SessionMiddleware(queries))
+
+	// auth.GET ..
 
 	if err := e.Start(fmt.Sprintf(":%d", port)); err != nil {
 		return err
