@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	// "os/user"
 	// "crypto/rand"
 	"crypto/rand"
 	"crypto/subtle"
@@ -10,12 +11,12 @@ import (
 	"encoding/base64"
 
 	// "encoding/base64"
-	"time"
 	"errors"
 	"fmt"
 	"log"
 	"net/http"
 	"strings"
+	"time"
 
 	_ "modernc.org/sqlite"
 
@@ -43,6 +44,15 @@ type loginRequest struct {
 	Username string `json:"username"`
 	Passwd string `json:"passwd"`
 }
+
+type createBoxRequest struct {
+	Boxname string `json:"box-name"`
+}
+
+type deleteBoxRequest struct {
+	BoxID int64 `json:"box-id"`
+}
+
 //go:embed sql/schema.sql
 var ddl string
 
@@ -238,7 +248,7 @@ func run() error {
 			return err
 		}
 		// パスワードのハッシュ化
-		passwd, err := HashingArgon2(user_request.Passwd, salt, MEMORY, TIME, THREADS, KEYLENGTH)
+		passwd, err := HashingArgon2(user_request.Passwd, salt, TIME, MEMORY, THREADS, KEYLENGTH)
 		if err != nil {
 			return err
 		}
@@ -309,25 +319,99 @@ func run() error {
 	})
 
 	// ミドルウェアによる検問
-	auth := e.Group("")
+	auth := e.Group("/api")
 	auth.Use(SessionMiddleware(queries))
 
 	// read box 自身のストックボックス一覧 (50)
-	e.POST("/my-box", func(c *echo.Context) error {
+	auth.GET("/my-box", func(c *echo.Context) error {
+		ctx = c.Request().Context()
 
+		// CookieからユーザーIDを取得
+		userID, ok := c.Get("user_id").(int64)
 
-		return nil
+		if !ok {
+			return c.JSON(http.StatusInternalServerError, map[string]string{"message":"user_idが取れませんでした"})
+		}
+
+		result, err := queries.ListBox(ctx, userID)
+		
+		if err != nil {
+			return c.JSON(http.StatusInternalServerError, map[string]string{"message":"boxの取得に失敗しました"})
+		}
+
+		return c.JSON(http.StatusOK, result);
 	})
 
 	// create box
+	auth.POST("/create-box", func(c *echo.Context) error {
+		ctx := c.Request().Context()
+		// CookieからユーザーIDを取得
+		userID, ok := c.Get("user_id").(int64)
+
+		if !ok {
+			return c.JSON(http.StatusInternalServerError, map[string]string{"message":"user_idが取れませんでした"})
+		}
+
+		box_request := new(createBoxRequest)
+
+		// リクエストのJSONを構造体にバインド
+		if err := c.Bind(box_request); err != nil {
+			return err
+		}
+
+		create_box := database.CreateBoxParams{BoxName: box_request.Boxname, HostID: userID}
+		_, err := queries.CreateBox(ctx, create_box)
+		if err != nil {
+			return c.JSON(http.StatusInternalServerError, map[string]string{"message":"Boxの作成に失敗しました"})
+		}
+		return c.JSON(http.StatusOK, map[string]string{"message":"ボックスの作成に成功しました"})
+	})
 
 	// delete box
+	auth.POST("/delete-box", func(c *echo.Context) error {
+		ctx := c.Request().Context()
+		// CookieからユーザーIDを取得
+		userID, ok := c.Get("user_id").(int64)
+
+		if !ok {
+			return c.JSON(http.StatusInternalServerError, map[string]string{"message":"user_idが取れませんでした"})
+		}
+
+		delete_request := new(deleteBoxRequest)
+
+		// リクエストのJSONを構造体にバインド
+		if err := c.Bind(delete_request); err != nil {
+			return err
+		}
+
+		delete_box := database.DeleteBoxParams{BoxID:delete_request.BoxID, HostID:userID}
+		err := queries.DeleteBox(ctx, delete_box)
+		if err != nil {
+			return c.JSON(http.StatusInternalServerError, map[string]string{"message":"削除に失敗しました"})
+		}
+
+		return c.JSON(http.StatusOK, map[string]string{"messsage":fmt.Sprintf("%d 削除に成功しました", delete_request.BoxID)})
+	})
+
+	// get read_later
+	auth.GET("/box-read-later", func(c *echo.Context) error {
+		return nil
+	})
 
 	// create read_later
-	
-	// delete read_later
+	auth.POST("/create-read-later", func(c *echo.Context) error {
+		return nil
+	})
 
+	// delete read_later
+	auth.POST("/delete-read-later", func(c *echo.Context) error {
+		return nil
+	})
 	// edit read_later 
+	auth.PUT("/edit-read-later", func(c *echo.Context) error {
+		return nil
+	})
+
 
 	if err := e.Start(fmt.Sprintf(":%d", port)); err != nil {
 		return err

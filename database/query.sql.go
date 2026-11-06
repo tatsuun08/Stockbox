@@ -79,7 +79,7 @@ const createUser = `-- name: CreateUser :one
 INSERT INTO users (username, passwd)
 VALUES (?, ?)
 ON CONFLICT(username) DO NOTHING
-RETURNING (SELECT changes() = 0)
+RETURNING id
 `
 
 type CreateUserParams struct {
@@ -87,20 +87,25 @@ type CreateUserParams struct {
 	Passwd   string
 }
 
-func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (bool, error) {
+func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (int64, error) {
 	row := q.db.QueryRowContext(ctx, createUser, arg.Username, arg.Passwd)
-	var column_1 bool
-	err := row.Scan(&column_1)
-	return column_1, err
+	var id int64
+	err := row.Scan(&id)
+	return id, err
 }
 
 const deleteBox = `-- name: DeleteBox :exec
 DELETE FROM stockbox 
-WHERE id = ?1
+WHERE id = ?1 AND host_id = ?2
 `
 
-func (q *Queries) DeleteBox(ctx context.Context, boxID int64) error {
-	_, err := q.db.ExecContext(ctx, deleteBox, boxID)
+type DeleteBoxParams struct {
+	BoxID  int64
+	HostID int64
+}
+
+func (q *Queries) DeleteBox(ctx context.Context, arg DeleteBoxParams) error {
+	_, err := q.db.ExecContext(ctx, deleteBox, arg.BoxID, arg.HostID)
 	return err
 }
 
@@ -117,11 +122,16 @@ func (q *Queries) DeleteLoginSession(ctx context.Context, sessionID string) erro
 
 const deleteReadLater = `-- name: DeleteReadLater :exec
 DELETE FROM read_later
-WHERE id = ?1
+WHERE id = ?1 AND author_id = ?2
 `
 
-func (q *Queries) DeleteReadLater(ctx context.Context, id int64) error {
-	_, err := q.db.ExecContext(ctx, deleteReadLater, id)
+type DeleteReadLaterParams struct {
+	ID     int64
+	UserID int64
+}
+
+func (q *Queries) DeleteReadLater(ctx context.Context, arg DeleteReadLaterParams) error {
+	_, err := q.db.ExecContext(ctx, deleteReadLater, arg.ID, arg.UserID)
 	return err
 }
 
@@ -145,36 +155,21 @@ func (q *Queries) GetLoginSession(ctx context.Context, sessionID string) (LoginS
 }
 
 const getMe = `-- name: GetMe :one
-SELECT users.id, username, passwd, ls.id, session_id, user_id, expires_at, created_at FROM users
+SELECT username, user_id FROM users
 JOIN login_sessions AS ls ON users.id = ls.user_id
 WHERE ls.session_id = ?1
 LIMIT 1
 `
 
 type GetMeRow struct {
-	ID        int64
-	Username  string
-	Passwd    string
-	ID_2      int64
-	SessionID string
-	UserID    int64
-	ExpiresAt sql.NullString
-	CreatedAt sql.NullString
+	Username string
+	UserID   int64
 }
 
 func (q *Queries) GetMe(ctx context.Context, sessionID string) (GetMeRow, error) {
 	row := q.db.QueryRowContext(ctx, getMe, sessionID)
 	var i GetMeRow
-	err := row.Scan(
-		&i.ID,
-		&i.Username,
-		&i.Passwd,
-		&i.ID_2,
-		&i.SessionID,
-		&i.UserID,
-		&i.ExpiresAt,
-		&i.CreatedAt,
-	)
+	err := row.Scan(&i.Username, &i.UserID)
 	return i, err
 }
 
@@ -189,6 +184,35 @@ func (q *Queries) GetUser(ctx context.Context, username string) (User, error) {
 	var i User
 	err := row.Scan(&i.ID, &i.Username, &i.Passwd)
 	return i, err
+}
+
+const listBox = `-- name: ListBox :many
+SELECT id, box_name, host_id FROM stockbox
+WHERE host_id = ?1
+LIMIT 50
+`
+
+func (q *Queries) ListBox(ctx context.Context, userID int64) ([]Stockbox, error) {
+	rows, err := q.db.QueryContext(ctx, listBox, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Stockbox
+	for rows.Next() {
+		var i Stockbox
+		if err := rows.Scan(&i.ID, &i.BoxName, &i.HostID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const updateReadLater = `-- name: UpdateReadLater :one

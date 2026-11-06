@@ -20,7 +20,7 @@ CREATE TABLE IF NOT EXISTS stockbox (
   box_name TEXT NOT NULL,
   host_id INTEGER NOT NULL,
   FOREIGN KEY (host_id) REFERENCES users(id)
-)
+);
 
 CREATE TABLE IF NOT EXISTS read_later (
   id INTEGER PRIMARY KEY,
@@ -32,4 +32,4 @@ CREATE TABLE IF NOT EXISTS read_later (
   isShared BOOLEAN DEFAULT 0 NOT NULL,
 
   FOREIGN KEY (box_id) REFERENCES stockbox(id) ON DELETE CASCADE
-)
+);

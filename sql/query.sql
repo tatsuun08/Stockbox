@@ -1,13 +1,13 @@
 -- name: GetUser :one
 SELECT * FROM users
-WHERE users.username = :username
+WHERE users.username = sqlc.arg(username)
 LIMIT 1;
 
 -- name: CreateUser :one
 INSERT INTO users (username, passwd)
 VALUES (?, ?)
 ON CONFLICT(username) DO NOTHING
-RETURNING (SELECT changes() = 0);
+RETURNING id;
 
 -- name: CreateSession :one
 INSERT INTO login_sessions (session_id, user_id)
@@ -16,19 +16,24 @@ RETURNING id;
 
 -- name: GetLoginSession :one
 SELECT * FROM login_sessions
-WHERE session_id = :session_id
+WHERE session_id = sqlc.arg(session_id)
 LIMIT 1;
 
 -- name: DeleteLoginSession :exec
 DELETE FROM login_sessions
-WHERE session_id = :session_id
+WHERE session_id = sqlc.arg(session_id)
 LIMIT 1;
 
 -- name: GetMe :one
-SELECT * FROM users
+SELECT username, user_id FROM users
 JOIN login_sessions AS ls ON users.id = ls.user_id
-WHERE ls.session_id = :session_id
+WHERE ls.session_id = sqlc.arg(session_id)
 LIMIT 1;
+
+-- name: ListBox :many
+SELECT * FROM stockbox
+WHERE host_id = sqlc.arg(user_id)
+LIMIT 50;
 
 -- name: CreateBox :one
 INSERT INTO stockbox (box_name, host_id)
@@ -37,7 +42,7 @@ RETURNING id;
 
 -- name: DeleteBox :exec 
 DELETE FROM stockbox 
-WHERE id = :box_id;
+WHERE id = sqlc.arg(box_id) AND host_id = sqlc.arg(host_id);
 
 -- name: CreateReadLater :one
 INSERT INTO read_later (box_id, author_id, title, urlstr, content, isShared)
@@ -46,7 +51,7 @@ RETURNING id;
 
 -- name: DeleteReadLater :exec
 DELETE FROM read_later
-WHERE id = :id;
+WHERE id = sqlc.arg(id) AND author_id = sqlc.arg(user_id);
 
 -- name: UpdateReadLater :one
 UPDATE read_later
