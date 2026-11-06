@@ -112,7 +112,6 @@ func (q *Queries) DeleteBox(ctx context.Context, arg DeleteBoxParams) error {
 const deleteLoginSession = `-- name: DeleteLoginSession :exec
 DELETE FROM login_sessions
 WHERE session_id = ?1
-LIMIT 1
 `
 
 func (q *Queries) DeleteLoginSession(ctx context.Context, sessionID string) error {
@@ -187,7 +186,7 @@ func (q *Queries) GetUser(ctx context.Context, username string) (User, error) {
 }
 
 const listBox = `-- name: ListBox :many
-SELECT id, box_name, host_id FROM stockbox
+SELECT id, box_name, host_id, created_at FROM stockbox
 WHERE host_id = ?1
 LIMIT 50
 `
@@ -201,7 +200,51 @@ func (q *Queries) ListBox(ctx context.Context, userID int64) ([]Stockbox, error)
 	var items []Stockbox
 	for rows.Next() {
 		var i Stockbox
-		if err := rows.Scan(&i.ID, &i.BoxName, &i.HostID); err != nil {
+		if err := rows.Scan(
+			&i.ID,
+			&i.BoxName,
+			&i.HostID,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listReadLater = `-- name: ListReadLater :many
+SELECT id, box_id, author_id, title, urlstr, content, created_at, isshared FROM read_later
+WHERE box_id = ?1
+ORDER BY created_at DESC
+LIMIT 50
+`
+
+func (q *Queries) ListReadLater(ctx context.Context, boxID int64) ([]ReadLater, error) {
+	rows, err := q.db.QueryContext(ctx, listReadLater, boxID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ReadLater
+	for rows.Next() {
+		var i ReadLater
+		if err := rows.Scan(
+			&i.ID,
+			&i.BoxID,
+			&i.AuthorID,
+			&i.Title,
+			&i.Urlstr,
+			&i.Content,
+			&i.CreatedAt,
+			&i.Isshared,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

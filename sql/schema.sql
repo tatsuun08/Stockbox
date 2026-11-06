@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS stockbox (
   id INTEGER PRIMARY KEY,
   box_name TEXT NOT NULL,
   host_id INTEGER NOT NULL,
+  created_at TEXT DEFAULT (datetime('now')),
   FOREIGN KEY (host_id) REFERENCES users(id)
 );
 
@@ -29,6 +30,7 @@ CREATE TABLE IF NOT EXISTS read_later (
   title TEXT NOT NULL,
   urlstr TEXT,
   content TEXT,
+  created_at TEXT DEFAULT (datetime('now')),
   isShared BOOLEAN DEFAULT 0 NOT NULL,
 
   FOREIGN KEY (box_id) REFERENCES stockbox(id) ON DELETE CASCADE

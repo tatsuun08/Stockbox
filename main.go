@@ -11,6 +11,7 @@ import (
 	"encoding/base64"
 
 	// "encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -28,29 +29,98 @@ import (
 )
 
 const (
-	MEMORY = 64 * 1024
-	TIME = 3
-	THREADS = 4
+	MEMORY    = 64 * 1024
+	TIME      = 3
+	THREADS   = 4
 	KEYLENGTH = 32
-	SALTLEN = 16
+	SALTLEN   = 16
 )
 
 type userRequest struct {
 	Username string `json:"username"`
-	Passwd string `json:"passwd"`
+	Passwd   string `json:"passwd"`
 }
 
 type loginRequest struct {
 	Username string `json:"username"`
-	Passwd string `json:"passwd"`
+	Passwd   string `json:"passwd"`
 }
 
 type createBoxRequest struct {
 	Boxname string `json:"box-name"`
 }
 
+// box-name / boxname / box_name のどのキーでも受け付ける。
+func (r *createBoxRequest) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		BoxName     string `json:"box-name"`
+		BoxnameAlt  string `json:"boxname"`
+		BoxNameAlt2 string `json:"box_name"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	switch {
+	case raw.BoxName != "":
+		r.Boxname = raw.BoxName
+	case raw.BoxnameAlt != "":
+		r.Boxname = raw.BoxnameAlt
+	default:
+		r.Boxname = raw.BoxNameAlt2
+	}
+	return nil
+}
+
+type boxResponse struct {
+	ID        int64  `json:"id"`
+	BoxName   string `json:"box-name"`
+	HostID    int64  `json:"host-id"`
+	CreatedAt string `json:"created-at"`
+}
+
+// sql.NullString をそのまま返すと {"String":...,"Valid":...} になるため変換する。
+// 空の一覧は null ではなく [] を返すため、必ず非nilスライスにする。
+func toBoxResponses(boxes []database.Stockbox) []boxResponse {
+	out := make([]boxResponse, 0, len(boxes))
+	for _, b := range boxes {
+		out = append(out, boxResponse{
+			ID:        b.ID,
+			BoxName:   b.BoxName,
+			HostID:    b.HostID,
+			CreatedAt: b.CreatedAt.String,
+		})
+	}
+	return out
+}
+
 type deleteBoxRequest struct {
 	BoxID int64 `json:"box-id"`
+}
+
+type listReadLaterRequest struct {
+	BoxID int64 `json:"box-id" query:"box-id"`
+}
+
+type createReadLaterRequest struct {
+	BoxID    int64  `json:"box-id"`
+	AuthorID int64  `json:"user-id"`
+	Title    string `json:"title"`
+	Urlstr   string `json:"url"`
+	Content  string `json:"content"`
+	IsShared bool   `json:"is-shared"`
+}
+
+type deleteReadLaterRequest struct {
+	ID int64 `json:"read-later-id"`
+}
+
+type updateReadLaterRequest struct {
+	BoxID    int64  `json:"box-id"`
+	Title    string `json:"title"`
+	Urlstr   string `json:"url"`
+	Content  string `json:"content"`
+	Isshared bool   `json:"is-shared"`
+	ID       int64  `json:"read-later-id"`
 }
 
 //go:embed sql/schema.sql
@@ -60,7 +130,7 @@ var ddl string
 func connect_db() (*sql.DB, error) {
 	// データベース接続
 	db, err := sql.Open("sqlite", "appdb.db")
-	if err != nil{
+	if err != nil {
 		return nil, err
 	}
 	return db, nil
@@ -74,9 +144,8 @@ func create_table(db *sql.DB, ctx context.Context) error {
 	return nil
 }
 
-
 // Hashing with argon2
-func HashingArgon2(password string, salt []byte, time uint32, memory uint32, threads uint8, keyLen uint32)(string, error){
+func HashingArgon2(password string, salt []byte, time uint32, memory uint32, threads uint8, keyLen uint32) (string, error) {
 	// テキストのBase64エンコーディング
 	encodedPassword := []byte(password)
 
@@ -85,13 +154,13 @@ func HashingArgon2(password string, salt []byte, time uint32, memory uint32, thr
 	b64Salt := base64.RawStdEncoding.EncodeToString(salt) // (byte -> b64 string)
 	b64Hash := base64.RawStdEncoding.EncodeToString(hash) // (byte -> b64 string)
 
-	return fmt.Sprintf("$argon2id$v=%d$m=%d,t=%d,p=%d$%s$%s", argon2.Version, memory, time , threads, b64Salt, b64Hash), nil
+	return fmt.Sprintf("$argon2id$v=%d$m=%d,t=%d,p=%d$%s$%s", argon2.Version, memory, time, threads, b64Salt, b64Hash), nil
 }
 
 // test argon2
-func VerifyPassword(password string, encodedHash string)(bool, error) {
+func VerifyPassword(password string, encodedHash string) (bool, error) {
 	vals := strings.Split(encodedHash, "$")
-	if (len(vals) != 6){
+	if len(vals) != 6 {
 		return false, errors.New("invalid hash format")
 	}
 
@@ -163,36 +232,36 @@ func SessionMiddleware(queries *database.Queries) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c *echo.Context) error {
 			ctx := c.Request().Context()
-			
+
 			// クッキーを読み込む
 			sessionId, err := readCookieSessionId(c)
 			if err != nil {
-				return c.JSON(http.StatusUnauthorized, map[string]string{"message":"クッキーが見つかりません"})
+				return c.JSON(http.StatusUnauthorized, map[string]string{"message": "クッキーが見つかりません"})
 			}
-			
+
 			// DBで探す
 			loginSession, err := queries.GetLoginSession(ctx, sessionId)
 			if err != nil {
-				return c.JSON(http.StatusUnauthorized, map[string]string{"message":"ログインセッションが見つかりません"})
+				return c.JSON(http.StatusUnauthorized, map[string]string{"message": "ログインセッションが見つかりません"})
 			}
 
 			// 期限切れチェック
 			if !loginSession.ExpiresAt.Valid {
-				return c.JSON(http.StatusUnauthorized, map[string]string{"message":"期限情報なし"})
+				return c.JSON(http.StatusUnauthorized, map[string]string{"message": "期限情報なし"})
 			}
 
 			expiresAt, err := time.Parse("2006-01-02 15:04:05", loginSession.ExpiresAt.String)
 			if err != nil {
-				return c.JSON(http.StatusInternalServerError, map[string]string{"message":"internal server error"})
+				return c.JSON(http.StatusInternalServerError, map[string]string{"message": "internal server error"})
 			}
 
 			t := time.Now()
-			
+
 			// 切れていたら
 			if t.After(expiresAt) {
 				// セッションの削除
 				_ = queries.DeleteLoginSession(ctx, sessionId)
-				return c.JSON(http.StatusUnauthorized, map[string]string{"message":"セッション期限切れです"})
+				return c.JSON(http.StatusUnauthorized, map[string]string{"message": "セッション期限切れです"})
 			}
 			// OKなら
 			c.Set("user_id", loginSession.UserID)
@@ -202,19 +271,18 @@ func SessionMiddleware(queries *database.Queries) echo.MiddlewareFunc {
 	}
 }
 
-
 func run() error {
 	var port int = 1323
-	
+
 	ctx := context.Background()
 
 	db, err := connect_db()
-	if err != nil{
+	if err != nil {
 		return err
 	}
 
 	err = create_table(db, ctx)
-	if err != nil{
+	if err != nil {
 		return err
 	}
 
@@ -233,11 +301,12 @@ func run() error {
 	})
 
 	e.GET("/test", func(c *echo.Context) error {
-		return c.JSON(http.StatusOK, map[string]string{"message":"THIS IS TEST!!"})
+		return c.JSON(http.StatusOK, map[string]string{"message": "THIS IS TEST!!"})
 	})
 
 	e.POST("/create_user", func(c *echo.Context) error {
-		user_request := new(userRequest)		
+		ctx := c.Request().Context()
+		user_request := new(userRequest)
 
 		if err := c.Bind(user_request); err != nil {
 			return err
@@ -253,19 +322,19 @@ func run() error {
 			return err
 		}
 
-
 		// DBにユーザー情報を保存
 		if _, err := queries.CreateUser(ctx, database.CreateUserParams{
 			Username: user_request.Username,
-			Passwd: passwd,
+			Passwd:   passwd,
 		}); err != nil {
-			return c.JSON(http.StatusInternalServerError, map[string]string{"message":"Username already exists"})
+			return c.JSON(http.StatusInternalServerError, map[string]string{"message": "Username already exists"})
 		}
 
-		return c.JSON(http.StatusOK, map[string]string{"message":"New user created"})
+		return c.JSON(http.StatusOK, map[string]string{"message": "New user created"})
 	})
 
 	e.POST("/login", func(c *echo.Context) error {
+		ctx := c.Request().Context()
 		login_request := new(loginRequest)
 
 		// リクエストのJSONを構造体にバインド
@@ -304,7 +373,7 @@ func run() error {
 					ctx,
 					database.CreateSessionParams{
 						SessionID: sessionId,
-						UserID: user_db.ID,
+						UserID:    user_db.ID,
 					},
 				)
 				if err != nil {
@@ -312,7 +381,7 @@ func run() error {
 				}
 			}
 			return c.JSON(http.StatusOK, fmt.Sprintf("%s login success", user_db.Username))
-		}else {
+		} else {
 			return c.JSON(http.StatusInternalServerError, map[string]string{"message": "Mismatch Username or Password"})
 		}
 
@@ -324,22 +393,22 @@ func run() error {
 
 	// read box 自身のストックボックス一覧 (50)
 	auth.GET("/my-box", func(c *echo.Context) error {
-		ctx = c.Request().Context()
+		ctx := c.Request().Context()
 
 		// CookieからユーザーIDを取得
 		userID, ok := c.Get("user_id").(int64)
 
 		if !ok {
-			return c.JSON(http.StatusInternalServerError, map[string]string{"message":"user_idが取れませんでした"})
+			return c.JSON(http.StatusInternalServerError, map[string]string{"message": "user_idが取れませんでした"})
 		}
 
 		result, err := queries.ListBox(ctx, userID)
-		
+
 		if err != nil {
-			return c.JSON(http.StatusInternalServerError, map[string]string{"message":"boxの取得に失敗しました"})
+			return c.JSON(http.StatusInternalServerError, map[string]string{"message": "boxの取得に失敗しました: " + err.Error()})
 		}
 
-		return c.JSON(http.StatusOK, result);
+		return c.JSON(http.StatusOK, toBoxResponses(result))
 	})
 
 	// create box
@@ -349,7 +418,7 @@ func run() error {
 		userID, ok := c.Get("user_id").(int64)
 
 		if !ok {
-			return c.JSON(http.StatusInternalServerError, map[string]string{"message":"user_idが取れませんでした"})
+			return c.JSON(http.StatusInternalServerError, map[string]string{"message": "user_idが取れませんでした"})
 		}
 
 		box_request := new(createBoxRequest)
@@ -359,12 +428,16 @@ func run() error {
 			return err
 		}
 
-		create_box := database.CreateBoxParams{BoxName: box_request.Boxname, HostID: userID}
+		boxName := strings.TrimSpace(box_request.Boxname)
+		if boxName == "" {
+			return c.JSON(http.StatusBadRequest, map[string]string{"message": "box-nameが空です"})
+		}
+		create_box := database.CreateBoxParams{BoxName: boxName, HostID: userID}
 		_, err := queries.CreateBox(ctx, create_box)
 		if err != nil {
-			return c.JSON(http.StatusInternalServerError, map[string]string{"message":"Boxの作成に失敗しました"})
+			return c.JSON(http.StatusInternalServerError, map[string]string{"message": "Boxの作成に失敗しました"})
 		}
-		return c.JSON(http.StatusOK, map[string]string{"message":"ボックスの作成に成功しました"})
+		return c.JSON(http.StatusOK, map[string]string{"message": "ボックスの作成に成功しました"})
 	})
 
 	// delete box
@@ -374,7 +447,7 @@ func run() error {
 		userID, ok := c.Get("user_id").(int64)
 
 		if !ok {
-			return c.JSON(http.StatusInternalServerError, map[string]string{"message":"user_idが取れませんでした"})
+			return c.JSON(http.StatusInternalServerError, map[string]string{"message": "user_idが取れませんでした"})
 		}
 
 		delete_request := new(deleteBoxRequest)
@@ -384,44 +457,135 @@ func run() error {
 			return err
 		}
 
-		delete_box := database.DeleteBoxParams{BoxID:delete_request.BoxID, HostID:userID}
+		delete_box := database.DeleteBoxParams{BoxID: delete_request.BoxID, HostID: userID}
 		err := queries.DeleteBox(ctx, delete_box)
 		if err != nil {
-			return c.JSON(http.StatusInternalServerError, map[string]string{"message":"削除に失敗しました"})
+			return c.JSON(http.StatusInternalServerError, map[string]string{"message": "削除に失敗しました"})
 		}
 
-		return c.JSON(http.StatusOK, map[string]string{"messsage":fmt.Sprintf("%d 削除に成功しました", delete_request.BoxID)})
+		return c.JSON(http.StatusOK, map[string]string{"messsage": fmt.Sprintf("%d 削除に成功しました", delete_request.BoxID)})
 	})
 
 	// get read_later
 	auth.GET("/box-read-later", func(c *echo.Context) error {
-		return nil
+		ctx := c.Request().Context()
+
+		box_read_later := new(listReadLaterRequest)
+		err := c.Bind(box_read_later)
+		if err != nil {
+			return c.JSON(http.StatusBadRequest, "リクエストの取得に失敗しました")
+		}
+
+		result, err := queries.ListReadLater(ctx, box_read_later.BoxID)
+
+		if err != nil {
+			return c.JSON(http.StatusInternalServerError, "データの取得に失敗しました")
+		}
+
+		return c.JSON(http.StatusOK, result)
 	})
 
 	// create read_later
 	auth.POST("/create-read-later", func(c *echo.Context) error {
-		return nil
+		ctx := c.Request().Context()
+
+		create_request := new(createReadLaterRequest)
+		err := c.Bind(create_request)
+		if err != nil {
+			return c.JSON(http.StatusBadRequest, map[string]string{"message": "リクエストに失敗しました"})
+		}
+
+		// CookieからユーザーIDを取得
+		userID, ok := c.Get("user_id").(int64)
+
+		if !ok {
+			return c.JSON(http.StatusInternalServerError, map[string]string{"message": "ユーザーIDが取れませんでした"})
+		}
+
+		create_read_later := database.CreateReadLaterParams{
+			BoxID: create_request.BoxID, Title: create_request.Title,
+			AuthorID: userID,
+			Urlstr:   sql.NullString{String: create_request.Urlstr, Valid: true},
+			Content:  sql.NullString{String: create_request.Content, Valid: true},
+			Isshared: create_request.IsShared,
+		}
+
+		_, err = queries.CreateReadLater(ctx, create_read_later)
+		if err != nil {
+			return c.JSON(http.StatusInternalServerError, map[string]string{"message": "後で読むの作成に失敗しました"})
+		}
+
+		return c.JSON(http.StatusOK, map[string]string{"message": "後で読むの作成に成功しました"})
+	})
+
+	// update read_later
+	auth.POST("/update-read-later", func(c *echo.Context) error {
+		ctx := c.Request().Context()
+
+		// CookieからユーザーIDを取得
+		userID, ok := c.Get("user_id").(int64)
+
+		if !ok {
+			return c.JSON(http.StatusInternalServerError, map[string]string{"message": "ユーザーIDが取れませんでした"})
+		}
+
+		update_request := new(updateReadLaterRequest)
+		err := c.Bind(update_request)
+		if err != nil {
+			return c.JSON(http.StatusBadRequest, map[string]string{"messasge": "リクエストに失敗しました"})
+		}
+
+		update_read_later := database.UpdateReadLaterParams{
+			ID:       update_request.ID,
+			AuthorID: userID,
+			Title:    update_request.Title,
+			Urlstr:   sql.NullString{String: update_request.Urlstr, Valid: true},
+			Content:  sql.NullString{String: update_request.Content, Valid: true},
+			Isshared: update_request.Isshared,
+			BoxID:    update_request.BoxID,
+		}
+		read_later_id, err := queries.UpdateReadLater(ctx, update_read_later)
+
+		if err != nil {
+			return c.JSON(http.StatusInternalServerError, "更新に失敗しました")
+		}
+
+		return c.JSON(http.StatusOK, map[string]string{"message": fmt.Sprintf("ID %d 更新に成功しました", read_later_id)})
 	})
 
 	// delete read_later
-	auth.POST("/delete-read-later", func(c *echo.Context) error {
-		return nil
+	auth.PUT("/delete-read-later", func(c *echo.Context) error {
+		ctx := c.Request().Context()
+
+		// CookieからユーザーIDを取得
+		userID, ok := c.Get("user_id").(int64)
+
+		if !ok {
+			return c.JSON(http.StatusInternalServerError, map[string]string{"message": "ユーザーIDが取れませんでした"})
+		}
+
+		delete_request := new(deleteReadLaterRequest)
+		err := c.Bind(delete_request)
+		if err != nil {
+			return c.JSON(http.StatusBadRequest, map[string]string{"messasge": "リクエストに失敗しました"})
+		}
+
+		delete_read_later := database.DeleteReadLaterParams{ID: delete_request.ID, UserID: userID}
+		err = queries.DeleteReadLater(ctx, delete_read_later)
+
+		if err != nil {
+			return c.JSON(http.StatusInternalServerError, "削除に失敗しました")
+		}
+
+		return c.JSON(http.StatusOK, map[string]string{"message": "削除に成功しました"})
+
 	})
-	// edit read_later 
-	auth.PUT("/edit-read-later", func(c *echo.Context) error {
-		return nil
-	})
 
-
-	if err := e.Start(fmt.Sprintf(":%d", port)); err != nil {
-		return err
-	}
-
-	return nil
+	return e.Start(fmt.Sprintf(":%d", port))
 }
 
 func main() {
-	if err := run(); err != nil{
+	if err := run(); err != nil {
 		log.Fatal(err)
 	}
-} 
+}

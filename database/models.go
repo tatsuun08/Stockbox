@@ -17,19 +17,21 @@ type LoginSession struct {
 }
 
 type ReadLater struct {
-	ID       int64
-	BoxID    int64
-	AuthorID int64
-	Title    string
-	Urlstr   sql.NullString
-	Content  sql.NullString
-	Isshared bool
+	ID        int64
+	BoxID     int64
+	AuthorID  int64
+	Title     string
+	Urlstr    sql.NullString
+	Content   sql.NullString
+	CreatedAt sql.NullString
+	Isshared  bool
 }
 
 type Stockbox struct {
-	ID      int64
-	BoxName string
-	HostID  int64
+	ID        int64
+	BoxName   string
+	HostID    int64
+	CreatedAt sql.NullString
 }
 
 type User struct {
